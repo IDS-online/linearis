@@ -19,6 +19,21 @@ function pluralize(entityType: string): string {
     : `${entityType}s`;
 }
 
+/**
+ * Whether an error is Linear's "no such entity" GraphQL error.
+ *
+ * `issue(id:)` and its siblings return a non-null entity, so a reference the
+ * API does not recognise arrives as this error rather than a null field. A
+ * lookup that has a second path to try uses this to tell "Linear says no such
+ * issue" apart from "the request failed", which must still surface.
+ */
+export function isEntityNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.toLowerCase().includes("entity not found")
+  );
+}
+
 export function multipleMatchesError(
   entityType: string,
   identifier: string,
