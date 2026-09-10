@@ -1,7 +1,12 @@
 import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import type { GraphQLClient } from "../client/graphql-client.js";
 import { isEntityNotFoundError, notFoundError } from "../common/errors.js";
-import type { BrandUuidFields, UUID } from "../common/identifier.js";
+import {
+  type BrandUuidFields,
+  formatIssueIdentifier,
+  issueCarriesIdentifier,
+  type UUID,
+} from "../common/identifier.js";
 import {
   requireMutationEntity,
   requireMutationSuccess,
@@ -335,18 +340,31 @@ function normalizeIssueReactions<
  *
  * Returns null when Linear recognises no such reference; any other failure is
  * rethrown rather than reported as a missing issue.
+ *
+ * A hit counts only once {@link issueCarriesIdentifier} proves the issue
+ * answers to the identifier that was asked for — `issue(id:)` accepts more
+ * kinds of reference than this reader models, and returning a near-miss would
+ * hand the caller a different issue than the one it named. The payload carries
+ * `previousIdentifiers` for exactly this check, which is why the fragment
+ * selects it.
  */
-async function readIssueByPreviousIdentifier<TIssue>(
+async function readIssueByPreviousIdentifier<
+  TIssue extends { identifier: string; previousIdentifiers: string[] },
+>(
   client: GraphQLClient,
   document: TypedDocumentNode<{ issue: TIssue }, { id: string }>,
   teamKey: string,
   issueNumber: number,
 ): Promise<TIssue | null> {
+  const identifier = formatIssueIdentifier({ teamKey, issueNumber });
+
   try {
-    const result = await client.request(document, {
-      id: `${teamKey}-${issueNumber}`,
-    });
-    return result.issue ?? null;
+    const result = await client.request(document, { id: identifier });
+    const issue = result.issue ?? null;
+
+    if (!issue || !issueCarriesIdentifier(issue, identifier)) return null;
+
+    return issue;
   } catch (error) {
     if (isEntityNotFoundError(error)) return null;
     throw error;

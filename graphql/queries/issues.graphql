@@ -112,6 +112,11 @@ fragment CompleteIssueFields on Issue {
 # 50-issue list for no benefit — so they hang off the single-read fragments
 # only, not off the shared list fragment.
 fragment IssueDetailOnlyFields on Issue {
+  # The identifiers this issue answered to before it moved teams. A read by
+  # identifier falls back to `issue(id:)`, which resolves references the reader
+  # never asked about, so the payload has to carry the proof that the issue
+  # really does answer to what was asked for.
+  previousIdentifiers
   subscribers {
     nodes {
       id
@@ -929,6 +934,8 @@ query FindIssueByAnyIdentifier($id: String!) {
   issue(id: $id) {
     id
     number
+    identifier
+    previousIdentifiers
     team {
       id
       key

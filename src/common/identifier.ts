@@ -81,6 +81,42 @@ export function tryParseIssueIdentifier(
   }
 }
 
+/** The canonical `TEAM-123` spelling of a parsed identifier ("ENG-007" → "ENG-7"). */
+export function formatIssueIdentifier(identifier: IssueIdentifier): string {
+  return `${identifier.teamKey}-${identifier.issueNumber}`;
+}
+
+/**
+ * Whether an issue answers to `ref` — as its current identifier, or as one it
+ * carried before it moved teams.
+ *
+ * This is the attestation behind every previous-identifier fallback, and the
+ * only reason those fallbacks are safe. `issue(id:)` resolves far more than the
+ * key-and-number reference the CLI asked about, so a hit is trusted only when
+ * the issue demonstrably carries that exact reference; anything else is a
+ * different issue and must be reported not-found rather than returned.
+ *
+ * The comparison is exact, after normalizing `ref` the way every other lookup
+ * normalizes it. Linear's own key/number filter is case-sensitive, so accepting
+ * a differently-cased spelling here would let the fallback resolve references
+ * the primary lookup rejects.
+ */
+export function issueCarriesIdentifier(
+  issue: { identifier: string; previousIdentifiers: readonly string[] },
+  ref: string,
+): boolean {
+  const parsed = tryParseIssueIdentifier(ref);
+
+  if (!parsed) return false;
+
+  const canonical = formatIssueIdentifier(parsed);
+
+  return (
+    issue.identifier === canonical ||
+    issue.previousIdentifiers.includes(canonical)
+  );
+}
+
 const DUE_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** @throws Error if date format is invalid or date doesn't exist */

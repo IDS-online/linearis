@@ -233,13 +233,22 @@ describe("resolveIssueRefs", () => {
 type LookupNode = {
   id: string;
   number?: number;
+  identifier?: string;
+  previousIdentifiers?: string[];
   team: { id: string; key: string };
 };
 
-const movedIssue: LookupNode = {
-  id: "moved-uuid",
-  team: { id: "zzx-team", key: "ZZX" },
-};
+/** An issue now living in team ZZX that used to answer to `ref`. */
+function movedFrom(ref: string, id = "moved-uuid"): LookupNode {
+  return {
+    id,
+    identifier: "ZZX-1",
+    previousIdentifiers: [ref],
+    team: { id: "zzx-team", key: "ZZX" },
+  };
+}
+
+const movedIssue = movedFrom("ENG-42");
 
 /**
  * Answers per document rather than per call, so a test can say "the filter
@@ -337,7 +346,7 @@ describe("previous-identifier fallback", () => {
       filterNodes: [
         { id: "issue-uuid", number: 42, team: { id: teamId, key: "ENG" } },
       ],
-      moved: movedIssue,
+      moved: movedFrom("ENG-7"),
     });
 
     await expect(
@@ -356,7 +365,12 @@ describe("previous-identifier fallback", () => {
 
   it("resolveIssueEstimateContext derives the team from the moved issue", async () => {
     const { client } = mockMovedIssueClient({
-      moved: { id: "moved-uuid", team: { id: teamId, key: "ENG" } },
+      moved: {
+        id: "moved-uuid",
+        identifier: "ZZX-1",
+        previousIdentifiers: ["ENG-42"],
+        team: { id: teamId, key: "ENG" },
+      },
       teams: [exponentialTeam],
     });
 
@@ -394,6 +408,76 @@ describe("previous-identifier fallback", () => {
 
     await expect(resolveParentIssueId(client, [], "ENG-999")).rejects.toThrow(
       'Issue "ENG-999" not found',
+    );
+  });
+});
+
+describe("attesting a fallback hit", () => {
+  it("resolves when the issue lists the identifier among its previous ones", async () => {
+    const { client } = mockMovedIssueClient({ moved: movedFrom("ENG-42") });
+
+    await expect(resolveIssueId(client, "ENG-42")).resolves.toBe("moved-uuid");
+  });
+
+  it("resolves when the identifier is the issue's current one", async () => {
+    const { client } = mockMovedIssueClient({
+      moved: {
+        id: "moved-uuid",
+        identifier: "ENG-42",
+        previousIdentifiers: [],
+        team: { id: teamId, key: "ENG" },
+      },
+    });
+
+    await expect(resolveIssueId(client, "ENG-42")).resolves.toBe("moved-uuid");
+  });
+
+  it("refuses an issue that carries neither, rather than returning its UUID", async () => {
+    const { client } = mockMovedIssueClient({
+      moved: {
+        id: "someone-elses-uuid",
+        identifier: "ZZX-9",
+        previousIdentifiers: ["DES-3"],
+        team: { id: "zzx-team", key: "ZZX" },
+      },
+    });
+
+    await expect(resolveIssueId(client, "ENG-42")).rejects.toThrow(
+      'Issue "ENG-42" not found',
+    );
+  });
+
+  it("refuses it in the batch path too", async () => {
+    const { client } = mockMovedIssueClient({
+      moved: {
+        id: "someone-elses-uuid",
+        identifier: "ZZX-9",
+        previousIdentifiers: ["DES-3"],
+        team: { id: "zzx-team", key: "ZZX" },
+      },
+    });
+
+    await expect(resolveIssueRefs(client, ["ENG-42"])).rejects.toThrow(
+      'Issue "ENG-42" not found',
+    );
+    await expect(resolveIssueEstimateContext(client, "ENG-42")).rejects.toThrow(
+      'Issue "ENG-42" not found',
+    );
+    await expect(resolveParentIssueId(client, [], "ENG-42")).rejects.toThrow(
+      'Issue "ENG-42" not found',
+    );
+  });
+
+  it("asks by the canonical spelling, so a padded number resolves", async () => {
+    const { request, client } = mockMovedIssueClient({
+      moved: movedFrom("ENG-42"),
+    });
+
+    await expect(resolveIssueId(client, "ENG-042")).resolves.toBe("moved-uuid");
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      FindIssueByAnyIdentifierDocument,
+      { id: "ENG-42" },
     );
   });
 });

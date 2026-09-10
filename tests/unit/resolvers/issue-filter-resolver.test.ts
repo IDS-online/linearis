@@ -232,7 +232,13 @@ describe("--parent naming an issue that has moved teams", () => {
   it("resolves the previous identifier the batch query cannot match", async () => {
     const request = vi.fn(async (document: unknown) =>
       document === FindIssueByAnyIdentifierDocument
-        ? { issue: { id: "moved-parent-uuid" } }
+        ? {
+            issue: {
+              id: "moved-parent-uuid",
+              identifier: "ZZX-1",
+              previousIdentifiers: ["ENG-7"],
+            },
+          }
         : buildBatchResponse({}),
     );
     const client = { request } as unknown as GraphQLClient;
@@ -253,5 +259,26 @@ describe("--parent naming an issue that has moved teams", () => {
     await expect(
       resolveSearchFilterIds(client, { parent: "ENG-999" }),
     ).rejects.toThrow('Issue "ENG-999" not found');
+  });
+});
+
+describe("--parent whose fallback hit is a different issue", () => {
+  it("reports not found rather than filtering by the wrong parent", async () => {
+    const request = vi.fn(async (document: unknown) =>
+      document === FindIssueByAnyIdentifierDocument
+        ? {
+            issue: {
+              id: "someone-elses-uuid",
+              identifier: "ZZX-9",
+              previousIdentifiers: ["DES-3"],
+            },
+          }
+        : buildBatchResponse({}),
+    );
+    const client = { request } as unknown as GraphQLClient;
+
+    await expect(
+      resolveSearchFilterIds(client, { parent: "ENG-7" }),
+    ).rejects.toThrow('Issue "ENG-7" not found');
   });
 });

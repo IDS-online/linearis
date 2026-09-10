@@ -2,6 +2,8 @@ import type { GraphQLClient } from "../client/graphql-client.js";
 import { isEntityNotFoundError, notFoundError } from "../common/errors.js";
 import {
   asUuid,
+  formatIssueIdentifier,
+  issueCarriesIdentifier,
   isUuid,
   parseIssueIdentifier,
   tryParseIssueIdentifier,
@@ -48,23 +50,36 @@ function issueLookupFilter(issueIdOrIdentifier: string): IssueFilter {
  * through the filter, and a malformed string would trade a precise format
  * error for a confusing API one. Returns null when Linear knows no such issue,
  * leaving the caller to report not-found for the reference actually given.
+ *
+ * A hit is returned only once {@link issueCarriesIdentifier} proves the issue
+ * answers to the reference that was asked for. `issue(id:)` accepts more kinds
+ * of reference than this lookup models, so trusting it unchecked would let a
+ * near-miss resolve to a different issue's UUID — the one failure mode a
+ * fallback must not have.
  */
 export async function findIssueByPreviousIdentifier(
   client: GraphQLClient,
   issueIdOrIdentifier: string,
 ): Promise<IssueLookupNode | null> {
-  if (
-    isUuid(issueIdOrIdentifier) ||
-    !tryParseIssueIdentifier(issueIdOrIdentifier)
-  ) {
-    return null;
-  }
+  if (isUuid(issueIdOrIdentifier)) return null;
+
+  const parsed = tryParseIssueIdentifier(issueIdOrIdentifier);
+
+  if (!parsed) return null;
+
+  // Ask by the canonical spelling. Linear rejects a zero-padded number that
+  // `parseIssueIdentifier` accepts, and the attestation compares against this
+  // same normalized form.
+  const identifier = formatIssueIdentifier(parsed);
 
   try {
     const { issue } = await client.request(FindIssueByAnyIdentifierDocument, {
-      id: issueIdOrIdentifier,
+      id: identifier,
     });
-    return issue ?? null;
+
+    if (!issue || !issueCarriesIdentifier(issue, identifier)) return null;
+
+    return issue;
   } catch (error) {
     if (isEntityNotFoundError(error)) return null;
     throw error;
