@@ -1,7 +1,12 @@
+import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import type { GraphQLClient } from "../client/graphql-client.js";
-import { firstOrThrow } from "../common/array.js";
-import { notFoundError } from "../common/errors.js";
-import type { BrandUuidFields, UUID } from "../common/identifier.js";
+import { isEntityNotFoundError, notFoundError } from "../common/errors.js";
+import {
+  type BrandUuidFields,
+  formatIssueIdentifier,
+  issueCarriesIdentifier,
+  type UUID,
+} from "../common/identifier.js";
 import {
   requireMutationEntity,
   requireMutationSuccess,
@@ -324,6 +329,55 @@ function normalizeIssueReactions<
   };
 }
 
+/**
+ * Reads an issue by an identifier it no longer carries.
+ *
+ * The `GetIssueByIdentifier*` queries match team key plus number, which is
+ * exactly what a team move changes, so they miss an issue referenced by the
+ * identifier it had before. `issue(id:)` follows those previous identifiers
+ * and selects the very same fragment, so the by-UUID query doubles as the
+ * fallback for its by-identifier twin.
+ *
+ * Returns null when Linear recognises no such reference; any other failure is
+ * rethrown rather than reported as a missing issue.
+ *
+ * A hit counts only once {@link issueCarriesIdentifier} proves the issue
+ * answers to the identifier that was asked for — `issue(id:)` accepts more
+ * kinds of reference than this reader models, and returning a near-miss would
+ * hand the caller a different issue than the one it named. The payload carries
+ * `previousIdentifiers` for exactly this check, which is why the fragment
+ * selects it.
+ */
+async function readIssueByPreviousIdentifier<
+  TIssue extends { identifier: string; previousIdentifiers: string[] },
+>(
+  client: GraphQLClient,
+  document: TypedDocumentNode<{ issue: TIssue }, { id: string }>,
+  teamKey: string,
+  issueNumber: number,
+): Promise<TIssue | null> {
+  const identifier = formatIssueIdentifier({ teamKey, issueNumber });
+
+  try {
+    const result = await client.request(document, { id: identifier });
+    const issue = result.issue ?? null;
+
+    if (!issue || !issueCarriesIdentifier(issue, identifier)) return null;
+
+    return issue;
+  } catch (error) {
+    if (isEntityNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+/** The error the by-identifier readers raise once both lookups come up empty. */
+function issueIdentifierNotFound(teamKey: string, issueNumber: number): Error {
+  return new Error(
+    `Issue with identifier "${teamKey}-${issueNumber}" not found`,
+  );
+}
+
 export async function listIssues(
   client: GraphQLClient,
   options: IssueReadOptions = {},
@@ -393,10 +447,18 @@ export async function getIssueByIdentifier(
     teamKey,
     number: issueNumber,
   });
-  return firstOrThrow(
-    result.issues.nodes,
-    `Issue with identifier "${teamKey}-${issueNumber}" not found`,
-  );
+  const issue =
+    result.issues.nodes[0] ??
+    (await readIssueByPreviousIdentifier(
+      client,
+      GetIssueByIdDocument,
+      teamKey,
+      issueNumber,
+    ));
+
+  if (!issue) throw issueIdentifierNotFound(teamKey, issueNumber);
+
+  return issue;
 }
 
 export async function getIssueByIdentifierWithComments(
@@ -408,10 +470,18 @@ export async function getIssueByIdentifierWithComments(
     GetIssueByIdentifierWithCommentsDocument,
     { teamKey, number: issueNumber },
   );
-  return firstOrThrow(
-    result.issues.nodes,
-    `Issue with identifier "${teamKey}-${issueNumber}" not found`,
-  );
+  const issue =
+    result.issues.nodes[0] ??
+    (await readIssueByPreviousIdentifier(
+      client,
+      GetIssueByIdWithCommentsDocument,
+      teamKey,
+      issueNumber,
+    ));
+
+  if (!issue) throw issueIdentifierNotFound(teamKey, issueNumber);
+
+  return issue;
 }
 
 export async function getIssueByIdentifierWithCommentThreads(
@@ -449,12 +519,18 @@ export async function getIssueByIdentifierWithReactions(
     GetIssueByIdentifierWithReactionsDocument,
     { teamKey, number: issueNumber },
   );
-  return normalizeIssueReactions(
-    firstOrThrow(
-      result.issues.nodes,
-      `Issue with identifier "${teamKey}-${issueNumber}" not found`,
-    ),
-  );
+  const issue =
+    result.issues.nodes[0] ??
+    (await readIssueByPreviousIdentifier(
+      client,
+      GetIssueByIdWithReactionsDocument,
+      teamKey,
+      issueNumber,
+    ));
+
+  if (!issue) throw issueIdentifierNotFound(teamKey, issueNumber);
+
+  return normalizeIssueReactions(issue);
 }
 
 export async function getIssueWithAttachments(
@@ -479,10 +555,18 @@ export async function getIssueByIdentifierWithAttachments(
     GetIssueByIdentifierWithAttachmentsDocument,
     { teamKey, number: issueNumber },
   );
-  return firstOrThrow(
-    result.issues.nodes,
-    `Issue with identifier "${teamKey}-${issueNumber}" not found`,
-  );
+  const issue =
+    result.issues.nodes[0] ??
+    (await readIssueByPreviousIdentifier(
+      client,
+      GetIssueByIdWithAttachmentsDocument,
+      teamKey,
+      issueNumber,
+    ));
+
+  if (!issue) throw issueIdentifierNotFound(teamKey, issueNumber);
+
+  return issue;
 }
 
 export async function searchIssues(

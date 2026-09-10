@@ -112,6 +112,11 @@ fragment CompleteIssueFields on Issue {
 # 50-issue list for no benefit — so they hang off the single-read fragments
 # only, not off the shared list fragment.
 fragment IssueDetailOnlyFields on Issue {
+  # The identifiers this issue answered to before it moved teams. A read by
+  # identifier falls back to `issue(id:)`, which resolves references the reader
+  # never asked about, so the payload has to carry the proof that the issue
+  # really does answer to what was asked for.
+  previousIdentifiers
   subscribers {
     nodes {
       id
@@ -911,6 +916,29 @@ query FindIssues($filter: IssueFilter, $first: Int = 1) {
         id
         key
       }
+    }
+  }
+}
+
+# Resolve any issue reference Linear still recognises
+#
+# `issue(id:)` takes a UUID *or* an identifier, and it follows the identifiers
+# an issue carried before it moved teams (its `previousIdentifiers`). The
+# filter-based lookups above cannot: they match the team key and number the
+# issue has now, so a reference written down before a move stops resolving.
+#
+# Selects the same identity fields as FindIssues so the two are interchangeable
+# at the call site. Linear types this field non-null, so an unknown reference
+# comes back as a GraphQL error rather than a null field.
+query FindIssueByAnyIdentifier($id: String!) {
+  issue(id: $id) {
+    id
+    number
+    identifier
+    previousIdentifiers
+    team {
+      id
+      key
     }
   }
 }

@@ -12,12 +12,12 @@ import {
   buildUserQuery,
   mapCycle,
   mapLabels,
-  mapParent,
   mapProjectId,
   mapUser,
   type UserNode,
 } from "./batch-resolve-mappers.js";
 import { resolveCycleId } from "./cycle-resolver.js";
+import { resolveParentIssueId } from "./issue-resolver.js";
 import { resolveStatusId } from "./status-resolver.js";
 import { isViewerAlias, resolveViewerId } from "./user-resolver.js";
 
@@ -177,7 +177,11 @@ export async function resolveSearchFilterIds(
   if (input.parent) {
     resolved.parentId = isUuid(input.parent)
       ? asUuid(input.parent)
-      : mapParent(response.parentIssues.nodes, input.parent);
+      : await resolveParentIssueId(
+          gqlClient,
+          response.parentIssues.nodes,
+          input.parent,
+        );
   }
 
   return resolved;

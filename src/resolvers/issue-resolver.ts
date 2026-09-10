@@ -1,17 +1,28 @@
 import type { GraphQLClient } from "../client/graphql-client.js";
-import { firstOrThrow } from "../common/array.js";
-import { notFoundError } from "../common/errors.js";
+import { isEntityNotFoundError, notFoundError } from "../common/errors.js";
 import {
   asUuid,
+  formatIssueIdentifier,
+  issueCarriesIdentifier,
   isUuid,
   parseIssueIdentifier,
+  tryParseIssueIdentifier,
   type UUID,
 } from "../common/identifier.js";
-import { FindIssuesDocument, type IssueFilter } from "../gql/graphql.js";
+import {
+  FindIssueByAnyIdentifierDocument,
+  FindIssuesDocument,
+  type FindIssuesQuery,
+  type IssueFilter,
+} from "../gql/graphql.js";
+import { mapParent, type ParentNode } from "./batch-resolve-mappers.js";
 import {
   resolveTeamEstimateContext,
   type TeamEstimateContext,
 } from "./team-resolver.js";
+
+/** The identity fields every issue lookup in this module selects. */
+type IssueLookupNode = FindIssuesQuery["issues"]["nodes"][number];
 
 /** Builds the FindIssues filter for a UUID or "TEAM-123" identifier. */
 function issueLookupFilter(issueIdOrIdentifier: string): IssueFilter {
@@ -26,6 +37,55 @@ function issueLookupFilter(issueIdOrIdentifier: string): IssueFilter {
   };
 }
 
+/**
+ * Second-chance lookup for a reference {@link issueLookupFilter} missed.
+ *
+ * Linear remembers the identifiers an issue carried before it moved teams and
+ * resolves them through `issue(id:)`. The filter cannot: it matches the team
+ * key and number the issue has *now*, so every reference recorded before the
+ * move — in a script, a commit message, a ticket body — stops resolving the
+ * moment the issue changes teams.
+ *
+ * Only identifier-shaped references are retried: a UUID already resolves
+ * through the filter, and a malformed string would trade a precise format
+ * error for a confusing API one. Returns null when Linear knows no such issue,
+ * leaving the caller to report not-found for the reference actually given.
+ *
+ * A hit is returned only once {@link issueCarriesIdentifier} proves the issue
+ * answers to the reference that was asked for. `issue(id:)` accepts more kinds
+ * of reference than this lookup models, so trusting it unchecked would let a
+ * near-miss resolve to a different issue's UUID — the one failure mode a
+ * fallback must not have.
+ */
+export async function findIssueByPreviousIdentifier(
+  client: GraphQLClient,
+  issueIdOrIdentifier: string,
+): Promise<IssueLookupNode | null> {
+  if (isUuid(issueIdOrIdentifier)) return null;
+
+  const parsed = tryParseIssueIdentifier(issueIdOrIdentifier);
+
+  if (!parsed) return null;
+
+  // Ask by the canonical spelling. Linear rejects a zero-padded number that
+  // `parseIssueIdentifier` accepts, and the attestation compares against this
+  // same normalized form.
+  const identifier = formatIssueIdentifier(parsed);
+
+  try {
+    const { issue } = await client.request(FindIssueByAnyIdentifierDocument, {
+      id: identifier,
+    });
+
+    if (!issue || !issueCarriesIdentifier(issue, identifier)) return null;
+
+    return issue;
+  } catch (error) {
+    if (isEntityNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
 export interface IssueEstimateContext {
   issueId: UUID;
   team: TeamEstimateContext;
@@ -34,7 +94,8 @@ export interface IssueEstimateContext {
 /**
  * Resolves issue identifier to UUID.
  *
- * Accepts UUID or issue identifier (e.g., "ENG-123").
+ * Accepts UUID or issue identifier (e.g., "ENG-123"), including one the issue
+ * carried before a team move.
  *
  * @param client - GraphQL client
  * @param issueIdOrIdentifier - Issue UUID or identifier
@@ -52,11 +113,13 @@ export async function resolveIssueId(
     first: 1,
   });
 
-  return asUuid(
-    firstOrThrow(issues.nodes, () =>
-      notFoundError("Issue", issueIdOrIdentifier),
-    ).id,
-  );
+  const node =
+    issues.nodes[0] ??
+    (await findIssueByPreviousIdentifier(client, issueIdOrIdentifier));
+
+  if (!node) throw notFoundError("Issue", issueIdOrIdentifier);
+
+  return asUuid(node.id);
 }
 
 /** An issue reference resolved to its UUID plus the team that scopes it. */
@@ -96,12 +159,23 @@ export async function resolveIssueRefs(
     first: unique.length,
   });
 
-  return unique.map((ref) => {
-    const node = issues.nodes.find((candidate) =>
-      isUuid(ref)
-        ? candidate.id === ref
-        : matchesIdentifier(candidate, parseIssueIdentifier(ref)),
-    );
+  // Only the references this one response did not cover fall back, and each
+  // falls back on its own: a single moved issue in a batch costs one extra
+  // lookup instead of failing every reference alongside it.
+  const nodes = await Promise.all(
+    unique.map(async (ref) => {
+      const matched = issues.nodes.find((candidate) =>
+        isUuid(ref)
+          ? candidate.id === ref
+          : matchesIdentifier(candidate, parseIssueIdentifier(ref)),
+      );
+
+      return matched ?? (await findIssueByPreviousIdentifier(client, ref));
+    }),
+  );
+
+  return unique.map((ref, index) => {
+    const node = nodes[index];
 
     if (!node) {
       throw notFoundError("Issue", ref);
@@ -126,6 +200,27 @@ function matchesIdentifier(
   );
 }
 
+/**
+ * {@link mapParent} with the previous-identifier second chance.
+ *
+ * The `BatchResolve*` queries look a parent up by team key and number, so a
+ * parent that has since moved teams is simply absent from the response — the
+ * same miss {@link findIssueByPreviousIdentifier} exists to cover. The
+ * not-found error, when both paths come up empty, is still `mapParent`'s.
+ */
+export async function resolveParentIssueId(
+  client: GraphQLClient,
+  nodes: ParentNode[],
+  ref: string,
+): Promise<UUID> {
+  if (nodes.length === 0) {
+    const moved = await findIssueByPreviousIdentifier(client, ref);
+    if (moved) return asUuid(moved.id);
+  }
+
+  return mapParent(nodes, ref);
+}
+
 export async function resolveIssueEstimateContext(
   client: GraphQLClient,
   issueIdOrIdentifier: string,
@@ -135,9 +230,11 @@ export async function resolveIssueEstimateContext(
     first: 1,
   });
 
-  const node = firstOrThrow(issues.nodes, () =>
-    notFoundError("Issue", issueIdOrIdentifier),
-  );
+  const node =
+    issues.nodes[0] ??
+    (await findIssueByPreviousIdentifier(client, issueIdOrIdentifier));
+
+  if (!node) throw notFoundError("Issue", issueIdOrIdentifier);
 
   return {
     issueId: asUuid(node.id),

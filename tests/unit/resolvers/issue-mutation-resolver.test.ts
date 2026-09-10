@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GraphQLClient } from "../../../src/client/graphql-client.js";
+import { FindIssueByAnyIdentifierDocument } from "../../../src/gql/graphql.js";
 import {
   resolveBatchCreateIssueIds,
   resolveCreateIssueIds,
@@ -734,5 +735,82 @@ describe("user reference lookups and unhandled rejections", () => {
     );
 
     expect(unhandled).toEqual([]);
+  });
+});
+
+describe("a parent that has moved teams", () => {
+  /**
+   * The batch query looks a parent up by team key and number, so a parent
+   * referenced by the identifier it had before a move is absent from the
+   * response and only `issue(id:)` still finds it.
+   */
+  function mockMovedParentGql(
+    nodes: Nodes,
+    moved: {
+      id: string;
+      identifier: string;
+      previousIdentifiers: string[];
+    } | null,
+  ) {
+    const request = vi.fn(async (document: unknown) =>
+      document === FindIssueByAnyIdentifierDocument
+        ? { issue: moved }
+        : buildResponse(nodes),
+    );
+    return { client: { request } as unknown as GraphQLClient, request };
+  }
+
+  const engTeam = { id: "team-uuid", key: "ENG", name: "Engineering" };
+
+  /** The parent as it looks after the move: ENG-7 now answers as ZZX-1. */
+  const movedParent = {
+    id: "moved-parent-uuid",
+    identifier: "ZZX-1",
+    previousIdentifiers: ["ENG-7"],
+  };
+
+  /** A different issue entirely — the fallback must not hand this one back. */
+  const otherIssue = {
+    id: "someone-elses-uuid",
+    identifier: "ZZX-9",
+    previousIdentifiers: ["DES-3"],
+  };
+
+  it("resolves --parent-ticket on create", async () => {
+    const { client, request } = mockMovedParentGql(
+      { teams: [engTeam] },
+      movedParent,
+    );
+
+    await expect(
+      resolveCreateIssueIds(client, { team: "ENG", parentTicket: "ENG-7" }),
+    ).resolves.toMatchObject({ parentId: "moved-parent-uuid" });
+    expect(request).toHaveBeenLastCalledWith(FindIssueByAnyIdentifierDocument, {
+      id: "ENG-7",
+    });
+  });
+
+  it("resolves --parent-ticket on update", async () => {
+    const { client } = mockMovedParentGql({}, movedParent);
+
+    await expect(
+      resolveUpdateIssueIds(client, { parentTicket: "ENG-7" }, {}),
+    ).resolves.toMatchObject({ parentId: "moved-parent-uuid" });
+  });
+
+  it("still reports an unknown parent", async () => {
+    const { client } = mockMovedParentGql({ teams: [engTeam] }, null);
+
+    await expect(
+      resolveCreateIssueIds(client, { team: "ENG", parentTicket: "ENG-999" }),
+    ).rejects.toThrow('Issue "ENG-999" not found');
+  });
+
+  it("refuses a parent that carries neither identifier", async () => {
+    const { client } = mockMovedParentGql({ teams: [engTeam] }, otherIssue);
+
+    await expect(
+      resolveCreateIssueIds(client, { team: "ENG", parentTicket: "ENG-7" }),
+    ).rejects.toThrow('Issue "ENG-7" not found');
   });
 });
