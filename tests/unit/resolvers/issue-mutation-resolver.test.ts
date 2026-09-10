@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GraphQLClient } from "../../../src/client/graphql-client.js";
+import { FindIssueByAnyIdentifierDocument } from "../../../src/gql/graphql.js";
 import {
   resolveBatchCreateIssueIds,
   resolveCreateIssueIds,
@@ -734,5 +735,55 @@ describe("user reference lookups and unhandled rejections", () => {
     );
 
     expect(unhandled).toEqual([]);
+  });
+});
+
+describe("a parent that has moved teams", () => {
+  /**
+   * The batch query looks a parent up by team key and number, so a parent
+   * referenced by the identifier it had before a move is absent from the
+   * response and only `issue(id:)` still finds it.
+   */
+  function mockMovedParentGql(nodes: Nodes, moved: { id: string } | null) {
+    const request = vi.fn(async (document: unknown) =>
+      document === FindIssueByAnyIdentifierDocument
+        ? { issue: moved }
+        : buildResponse(nodes),
+    );
+    return { client: { request } as unknown as GraphQLClient, request };
+  }
+
+  const engTeam = { id: "team-uuid", key: "ENG", name: "Engineering" };
+
+  it("resolves --parent-ticket on create", async () => {
+    const { client, request } = mockMovedParentGql(
+      { teams: [engTeam] },
+      {
+        id: "moved-parent-uuid",
+      },
+    );
+
+    await expect(
+      resolveCreateIssueIds(client, { team: "ENG", parentTicket: "ENG-7" }),
+    ).resolves.toMatchObject({ parentId: "moved-parent-uuid" });
+    expect(request).toHaveBeenLastCalledWith(FindIssueByAnyIdentifierDocument, {
+      id: "ENG-7",
+    });
+  });
+
+  it("resolves --parent-ticket on update", async () => {
+    const { client } = mockMovedParentGql({}, { id: "moved-parent-uuid" });
+
+    await expect(
+      resolveUpdateIssueIds(client, { parentTicket: "ENG-7" }, {}),
+    ).resolves.toMatchObject({ parentId: "moved-parent-uuid" });
+  });
+
+  it("still reports an unknown parent", async () => {
+    const { client } = mockMovedParentGql({ teams: [engTeam] }, null);
+
+    await expect(
+      resolveCreateIssueIds(client, { team: "ENG", parentTicket: "ENG-999" }),
+    ).rejects.toThrow('Issue "ENG-999" not found');
   });
 });

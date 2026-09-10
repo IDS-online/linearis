@@ -1326,3 +1326,86 @@ describe("snoozeIssue", () => {
     );
   });
 });
+
+/**
+ * The by-UUID documents, which double as the previous-identifier fallback:
+ * `issue(id:)` follows an identifier the issue carried before a team move.
+ */
+const BY_ID_DOCUMENTS: ReadonlySet<unknown> = new Set([
+  GetIssueByIdDocument,
+  GetIssueByIdWithCommentsDocument,
+  GetIssueByIdWithReactionsDocument,
+  GetIssueByIdWithAttachmentsDocument,
+]);
+
+/** A client whose key/number lookup finds nothing and whose `issue(id:)` does. */
+function mockMovedIssueClient(issue: unknown) {
+  const request = vi.fn(async (document: unknown) =>
+    BY_ID_DOCUMENTS.has(document) ? { issue } : { issues: { nodes: [] } },
+  );
+  return { request, client: { request } as unknown as GraphQLClient };
+}
+
+describe("reading an issue by a previous identifier", () => {
+  it("falls back to issue(id:) with the identifier as written", async () => {
+    const { request, client } = mockMovedIssueClient({
+      id: "moved-uuid",
+      comments: { nodes: [] },
+    });
+
+    const result = await getIssueByIdentifier(client, "ENG", 42);
+
+    expect(result.id).toBe("moved-uuid");
+    expect(request).toHaveBeenNthCalledWith(2, GetIssueByIdDocument, {
+      id: "ENG-42",
+    });
+  });
+
+  it("keeps the not-found error when neither lookup matches", async () => {
+    const request = vi.fn(async (document: unknown) =>
+      BY_ID_DOCUMENTS.has(document)
+        ? Promise.reject(new Error("Entity not found: Issue"))
+        : { issues: { nodes: [] } },
+    );
+    const client = { request } as unknown as GraphQLClient;
+
+    await expect(getIssueByIdentifier(client, "ENG", 999)).rejects.toThrow(
+      'Issue with identifier "ENG-999" not found',
+    );
+  });
+
+  it("rethrows a failure that is not an unknown reference", async () => {
+    const request = vi.fn(async (document: unknown) =>
+      BY_ID_DOCUMENTS.has(document)
+        ? Promise.reject(new Error("Request timed out"))
+        : { issues: { nodes: [] } },
+    );
+    const client = { request } as unknown as GraphQLClient;
+
+    await expect(getIssueByIdentifier(client, "ENG", 42)).rejects.toThrow(
+      "Request timed out",
+    );
+  });
+
+  it("covers the comment, reaction and attachment payloads too", async () => {
+    const { client } = mockMovedIssueClient({
+      id: "moved-uuid",
+      comments: { nodes: [{ id: "c1", body: "First", parentId: null }] },
+      reactions: [{ id: "r1", emoji: "+1", user: { id: "u1", name: "Ann" } }],
+      attachments: { nodes: [{ id: "a1", title: "Spec" }] },
+    });
+
+    await expect(
+      getIssueByIdentifierWithComments(client, "ENG", 42),
+    ).resolves.toMatchObject({ id: "moved-uuid" });
+    await expect(
+      getIssueByIdentifierWithCommentThreads(client, "ENG", 42),
+    ).resolves.toMatchObject({ id: "moved-uuid" });
+    await expect(
+      getIssueByIdentifierWithReactions(client, "ENG", 42),
+    ).resolves.toMatchObject({ id: "moved-uuid" });
+    await expect(
+      getIssueByIdentifierWithAttachments(client, "ENG", 42),
+    ).resolves.toMatchObject({ id: "moved-uuid" });
+  });
+});

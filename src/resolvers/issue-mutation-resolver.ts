@@ -16,13 +16,13 @@ import {
   mapCycle,
   mapLabels,
   mapMilestone,
-  mapParent,
   mapProjectNode,
   mapStatus,
   mapUser,
   type ProjectNode,
   type TeamNode,
 } from "./batch-resolve-mappers.js";
+import { resolveParentIssueId } from "./issue-resolver.js";
 import { resolveTeamId, type TeamEstimateContext } from "./team-resolver.js";
 import {
   isViewerAlias,
@@ -260,7 +260,11 @@ export async function resolveCreateIssueIds(
   if (input.parentTicket) {
     resolved.parentId = isUuid(input.parentTicket)
       ? asUuid(input.parentTicket)
-      : mapParent(response.parentIssues.nodes, input.parentTicket);
+      : await resolveParentIssueId(
+          client,
+          response.parentIssues.nodes,
+          input.parentTicket,
+        );
   }
 
   return { ...resolved, ...userRefs };
@@ -520,7 +524,11 @@ export async function resolveUpdateIssueIds(
   if (input.parentTicket) {
     resolved.parentId = isUuid(input.parentTicket)
       ? asUuid(input.parentTicket)
-      : mapParent(response.parentIssues.nodes, input.parentTicket);
+      : await resolveParentIssueId(
+          client,
+          response.parentIssues.nodes,
+          input.parentTicket,
+        );
   }
 
   return { ...resolved, ...userRefs };

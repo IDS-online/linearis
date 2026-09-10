@@ -915,6 +915,27 @@ query FindIssues($filter: IssueFilter, $first: Int = 1) {
   }
 }
 
+# Resolve any issue reference Linear still recognises
+#
+# `issue(id:)` takes a UUID *or* an identifier, and it follows the identifiers
+# an issue carried before it moved teams (its `previousIdentifiers`). The
+# filter-based lookups above cannot: they match the team key and number the
+# issue has now, so a reference written down before a move stops resolving.
+#
+# Selects the same identity fields as FindIssues so the two are interchangeable
+# at the call site. Linear types this field non-null, so an unknown reference
+# comes back as a GraphQL error rather than a null field.
+query FindIssueByAnyIdentifier($id: String!) {
+  issue(id: $id) {
+    id
+    number
+    team {
+      id
+      key
+    }
+  }
+}
+
 # Find the issue a VCS branch belongs to
 #
 # Linear derives a branch name per issue (the `branchName` field), and this is

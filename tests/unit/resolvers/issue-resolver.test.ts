@@ -2,9 +2,15 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GraphQLClient } from "../../../src/client/graphql-client.js";
 import {
+  FindIssueByAnyIdentifierDocument,
+  FindIssuesDocument,
+} from "../../../src/gql/graphql.js";
+import {
+  findIssueByPreviousIdentifier,
   resolveIssueEstimateContext,
   resolveIssueId,
   resolveIssueRefs,
+  resolveParentIssueId,
 } from "../../../src/resolvers/issue-resolver.js";
 
 type IssueNode = {
@@ -217,5 +223,177 @@ describe("resolveIssueRefs", () => {
 
     await expect(resolveIssueRefs(client, [])).resolves.toEqual([]);
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * An issue that has moved teams: the key/number filter no longer matches the
+ * identifier it was referenced by, and only `issue(id:)` still resolves it.
+ */
+type LookupNode = {
+  id: string;
+  number?: number;
+  team: { id: string; key: string };
+};
+
+const movedIssue: LookupNode = {
+  id: "moved-uuid",
+  team: { id: "zzx-team", key: "ZZX" },
+};
+
+/**
+ * Answers per document rather than per call, so a test can say "the filter
+ * finds nothing, `issue(id:)` finds the moved issue" without depending on the
+ * order the resolver happens to make its requests in.
+ */
+function mockMovedIssueClient(options: {
+  filterNodes?: LookupNode[];
+  moved?: LookupNode | null;
+  fallbackError?: Error;
+  teams?: TeamNode[];
+}) {
+  const request = vi.fn(async (document: unknown) => {
+    if (document === FindIssueByAnyIdentifierDocument) {
+      if (options.fallbackError) throw options.fallbackError;
+      return { issue: options.moved ?? null };
+    }
+    if (document === FindIssuesDocument) {
+      return { issues: { nodes: options.filterNodes ?? [] } };
+    }
+    return { teams: { nodes: options.teams ?? [] } };
+  });
+
+  return { request, client: { request } as unknown as GraphQLClient };
+}
+
+/** Linear's error for a reference it does not recognise at all. */
+const entityNotFound = new Error("Entity not found: Issue");
+
+describe("previous-identifier fallback", () => {
+  it("resolveIssueId resolves an identifier the issue carried before a team move", async () => {
+    const { request, client } = mockMovedIssueClient({ moved: movedIssue });
+
+    await expect(resolveIssueId(client, "ENG-42")).resolves.toBe("moved-uuid");
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      FindIssueByAnyIdentifierDocument,
+      { id: "ENG-42" },
+    );
+  });
+
+  it("resolveIssueId does not fall back when the filter already matched", async () => {
+    const { request, client } = mockMovedIssueClient({
+      filterNodes: [engIssue],
+    });
+
+    await expect(resolveIssueId(client, "ENG-42")).resolves.toBe("issue-uuid");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolveIssueId reports not found when Linear knows no such identifier", async () => {
+    const { client } = mockMovedIssueClient({ fallbackError: entityNotFound });
+
+    await expect(resolveIssueId(client, "ENG-999")).rejects.toThrow(
+      'Issue "ENG-999" not found',
+    );
+  });
+
+  it("resolveIssueId rethrows a failure that is not an unknown reference", async () => {
+    const { client } = mockMovedIssueClient({
+      fallbackError: new Error("Request timed out"),
+    });
+
+    await expect(resolveIssueId(client, "ENG-42")).rejects.toThrow(
+      "Request timed out",
+    );
+  });
+
+  it("keeps the format error for a malformed reference instead of calling issue(id:)", async () => {
+    const { request, client } = mockMovedIssueClient({});
+
+    await expect(resolveIssueId(client, "not an identifier")).rejects.toThrow(
+      "Invalid issue identifier format",
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("findIssueByPreviousIdentifier makes no request for a UUID or a malformed reference", async () => {
+    const { request, client } = mockMovedIssueClient({ moved: movedIssue });
+
+    await expect(
+      findIssueByPreviousIdentifier(
+        client,
+        "550e8400-e29b-41d4-a716-446655440000",
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      findIssueByPreviousIdentifier(client, "ENG-x-1"),
+    ).resolves.toBeNull();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("resolveIssueRefs mixes current and previous identifiers, one lookup per miss", async () => {
+    const { request, client } = mockMovedIssueClient({
+      filterNodes: [
+        { id: "issue-uuid", number: 42, team: { id: teamId, key: "ENG" } },
+      ],
+      moved: movedIssue,
+    });
+
+    await expect(
+      resolveIssueRefs(client, ["ENG-42", "ENG-7"]),
+    ).resolves.toEqual([
+      { ref: "ENG-42", id: "issue-uuid", teamId, teamKey: "ENG" },
+      {
+        ref: "ENG-7",
+        id: "moved-uuid",
+        teamId: "zzx-team",
+        teamKey: "ZZX",
+      },
+    ]);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolveIssueEstimateContext derives the team from the moved issue", async () => {
+    const { client } = mockMovedIssueClient({
+      moved: { id: "moved-uuid", team: { id: teamId, key: "ENG" } },
+      teams: [exponentialTeam],
+    });
+
+    await expect(
+      resolveIssueEstimateContext(client, "ENG-42"),
+    ).resolves.toMatchObject({
+      issueId: "moved-uuid",
+      team: { teamId, teamKey: "ENG" },
+    });
+  });
+
+  it("resolveParentIssueId finds a parent that has moved teams", async () => {
+    const { client } = mockMovedIssueClient({ moved: movedIssue });
+
+    await expect(resolveParentIssueId(client, [], "ENG-42")).resolves.toBe(
+      "moved-uuid",
+    );
+  });
+
+  it("resolveParentIssueId keeps the batch match when there is one", async () => {
+    const { request, client } = mockMovedIssueClient({ moved: movedIssue });
+
+    await expect(
+      resolveParentIssueId(
+        client,
+        [{ id: "parent-uuid", identifier: "ENG-42" }],
+        "ENG-42",
+      ),
+    ).resolves.toBe("parent-uuid");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("resolveParentIssueId reports the unknown parent", async () => {
+    const { client } = mockMovedIssueClient({ fallbackError: entityNotFound });
+
+    await expect(resolveParentIssueId(client, [], "ENG-999")).rejects.toThrow(
+      'Issue "ENG-999" not found',
+    );
   });
 });
