@@ -1,6 +1,8 @@
 // tests/unit/common/identifier.test.ts
 import { describe, expect, it } from "vitest";
 import {
+  formatIssueIdentifier,
+  issueCarriesIdentifier,
   isUuid,
   parseDueDate,
   parseIssueIdentifier,
@@ -82,5 +84,62 @@ describe("parseDueDate", () => {
 
   it("throws on empty string", () => {
     expect(() => parseDueDate("")).toThrow("Invalid due date format");
+  });
+});
+
+describe("formatIssueIdentifier", () => {
+  it("returns the canonical spelling", () => {
+    expect(formatIssueIdentifier({ teamKey: "ENG", issueNumber: 42 })).toBe(
+      "ENG-42",
+    );
+  });
+
+  it("drops a zero-padded number, which Linear does not accept", () => {
+    expect(formatIssueIdentifier(parseIssueIdentifier("ENG-007"))).toBe(
+      "ENG-7",
+    );
+  });
+});
+
+describe("issueCarriesIdentifier", () => {
+  const moved = {
+    identifier: "ZZX-1",
+    previousIdentifiers: ["ENG-42", "OLD-3"],
+  };
+
+  it("accepts the issue's current identifier", () => {
+    expect(issueCarriesIdentifier(moved, "ZZX-1")).toBe(true);
+  });
+
+  it("accepts an identifier it carried before a team move", () => {
+    expect(issueCarriesIdentifier(moved, "ENG-42")).toBe(true);
+    expect(issueCarriesIdentifier(moved, "OLD-3")).toBe(true);
+  });
+
+  it("normalizes the reference before comparing", () => {
+    expect(issueCarriesIdentifier(moved, "ENG-042")).toBe(true);
+  });
+
+  it("rejects an issue that carries neither", () => {
+    expect(issueCarriesIdentifier(moved, "ENG-43")).toBe(false);
+    expect(issueCarriesIdentifier(moved, "DES-42")).toBe(false);
+  });
+
+  it("rejects a differently-cased key, which the key filter would also reject", () => {
+    expect(issueCarriesIdentifier(moved, "eng-42")).toBe(false);
+  });
+
+  it("rejects a malformed reference", () => {
+    expect(issueCarriesIdentifier(moved, "not an identifier")).toBe(false);
+    expect(issueCarriesIdentifier(moved, "ENG-x")).toBe(false);
+  });
+
+  it("rejects everything when the issue lists no previous identifiers", () => {
+    expect(
+      issueCarriesIdentifier(
+        { identifier: "ZZX-1", previousIdentifiers: [] },
+        "ENG-42",
+      ),
+    ).toBe(false);
   });
 });

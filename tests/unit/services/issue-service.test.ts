@@ -1350,6 +1350,8 @@ describe("reading an issue by a previous identifier", () => {
   it("falls back to issue(id:) with the identifier as written", async () => {
     const { request, client } = mockMovedIssueClient({
       id: "moved-uuid",
+      identifier: "ZZX-1",
+      previousIdentifiers: ["ENG-42"],
       comments: { nodes: [] },
     });
 
@@ -1390,6 +1392,8 @@ describe("reading an issue by a previous identifier", () => {
   it("covers the comment, reaction and attachment payloads too", async () => {
     const { client } = mockMovedIssueClient({
       id: "moved-uuid",
+      identifier: "ZZX-1",
+      previousIdentifiers: ["ENG-42"],
       comments: { nodes: [{ id: "c1", body: "First", parentId: null }] },
       reactions: [{ id: "r1", emoji: "+1", user: { id: "u1", name: "Ann" } }],
       attachments: { nodes: [{ id: "a1", title: "Spec" }] },
@@ -1407,5 +1411,73 @@ describe("reading an issue by a previous identifier", () => {
     await expect(
       getIssueByIdentifierWithAttachments(client, "ENG", 42),
     ).resolves.toMatchObject({ id: "moved-uuid" });
+  });
+});
+
+describe("attesting a by-identifier fallback hit", () => {
+  it("accepts an issue whose current identifier is the one asked for", async () => {
+    const { client } = mockMovedIssueClient({
+      id: "moved-uuid",
+      identifier: "ENG-42",
+      previousIdentifiers: [],
+      comments: { nodes: [] },
+    });
+
+    await expect(
+      getIssueByIdentifier(client, "ENG", 42),
+    ).resolves.toMatchObject({ id: "moved-uuid" });
+  });
+
+  it("refuses an issue that carries neither identifier", async () => {
+    const { client } = mockMovedIssueClient({
+      id: "someone-elses-uuid",
+      identifier: "ZZX-9",
+      previousIdentifiers: ["DES-3"],
+      comments: { nodes: [] },
+    });
+
+    await expect(getIssueByIdentifier(client, "ENG", 42)).rejects.toThrow(
+      'Issue with identifier "ENG-42" not found',
+    );
+  });
+
+  it("refuses it in every payload variant", async () => {
+    const { client } = mockMovedIssueClient({
+      id: "someone-elses-uuid",
+      identifier: "ZZX-9",
+      previousIdentifiers: ["DES-3"],
+      comments: { nodes: [] },
+      reactions: [],
+      attachments: { nodes: [] },
+    });
+
+    await expect(
+      getIssueByIdentifierWithComments(client, "ENG", 42),
+    ).rejects.toThrow("not found");
+    await expect(
+      getIssueByIdentifierWithCommentThreads(client, "ENG", 42),
+    ).rejects.toThrow("not found");
+    await expect(
+      getIssueByIdentifierWithReactions(client, "ENG", 42),
+    ).rejects.toThrow("not found");
+    await expect(
+      getIssueByIdentifierWithAttachments(client, "ENG", 42),
+    ).rejects.toThrow("not found");
+  });
+
+  it("asks by the canonical spelling", async () => {
+    const { request, client } = mockMovedIssueClient({
+      id: "moved-uuid",
+      identifier: "ZZX-1",
+      previousIdentifiers: ["ENG-7"],
+      comments: { nodes: [] },
+    });
+
+    await expect(getIssueByIdentifier(client, "ENG", 7)).resolves.toMatchObject(
+      { id: "moved-uuid" },
+    );
+    expect(request).toHaveBeenNthCalledWith(2, GetIssueByIdDocument, {
+      id: "ENG-7",
+    });
   });
 });
