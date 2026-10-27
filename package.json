@@ -100,7 +100,7 @@
     "semantic-release": "^25.0.1",
     "tsx": "^4.20.5",
     "typescript": "^7.0.0",
-    "vitest": "^4.0.0"
+    "vitest": "^5.0.5"
   },
   "graphql": {
     "schema": "https://api.linear.app/graphql",
