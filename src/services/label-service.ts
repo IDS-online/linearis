@@ -33,8 +33,6 @@ export interface Label {
   type: LabelType;
   /** True when the label is a container for child labels rather than a tag. */
   isGroup: boolean;
-  /** Set while the label is retired: still readable, not applicable. */
-  retiredAt?: string;
   parent?: { id: string; name: string };
 }
 
@@ -77,7 +75,6 @@ interface LabelNode {
   color: string;
   description?: string | null;
   isGroup: boolean;
-  retiredAt?: string | null;
   parent?: { id: string; name: string } | null;
 }
 
@@ -89,7 +86,6 @@ function mapLabel(label: LabelNode, type: LabelType): Label {
     type,
     isGroup: label.isGroup,
     ...(label.description != null ? { description: label.description } : {}),
-    ...(label.retiredAt != null ? { retiredAt: label.retiredAt } : {}),
     ...(label.parent != null ? { parent: label.parent } : {}),
   };
 }

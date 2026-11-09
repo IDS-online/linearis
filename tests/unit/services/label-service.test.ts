@@ -454,7 +454,6 @@ describe("project label CRUD", () => {
         name: "Customer",
         color: "#0000ff",
         isGroup: false,
-        retiredAt: null,
         parent: { id: "plbl-0", name: "Tier" },
       },
     });
@@ -554,14 +553,12 @@ describe("retireLabel and restoreLabel", () => {
           id: "lbl-1",
           name: "Bug",
           color: "#ff0000",
-          retiredAt: "2026-08-10T00:00:00.000Z",
         },
       },
     });
 
     await expect(retireLabel(client, asUuid("lbl-1"))).resolves.toMatchObject({
       type: "issue",
-      retiredAt: "2026-08-10T00:00:00.000Z",
     });
 
     expect(client.request).toHaveBeenCalledWith(RetireIssueLabelDocument, {

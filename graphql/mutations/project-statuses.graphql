@@ -41,18 +41,3 @@ mutation UnarchiveProjectStatus($id: String!) {
     }
   }
 }
-
-# Move every project off one status and onto another
-#
-# The payload carries no entity — only whether the reassignment ran.
-mutation ReassignProjectStatus(
-  $originalProjectStatusId: String!
-  $newProjectStatusId: String!
-) {
-  projectReassignStatus(
-    originalProjectStatusId: $originalProjectStatusId
-    newProjectStatusId: $newProjectStatusId
-  ) {
-    success
-  }
-}

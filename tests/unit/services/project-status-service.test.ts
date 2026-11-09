@@ -5,9 +5,7 @@ import {
   ArchiveProjectStatusDocument,
   CreateProjectStatusDocument,
   GetProjectStatusDocument,
-  GetProjectStatusProjectCountDocument,
   ListProjectStatusesDocument,
-  ReassignProjectStatusDocument,
   UnarchiveProjectStatusDocument,
   UpdateProjectStatusDocument,
 } from "../../../src/gql/graphql.js";
@@ -16,7 +14,6 @@ import {
   createProjectStatus,
   getProjectStatus,
   listProjectStatuses,
-  reassignProjectStatus,
   unarchiveProjectStatus,
   updateProjectStatus,
 } from "../../../src/services/project-status-service.js";
@@ -79,26 +76,15 @@ describe("listProjectStatuses", () => {
 });
 
 describe("getProjectStatus", () => {
-  it("folds the project count into the status payload", async () => {
+  it("returns the status", async () => {
     const { client } = mockGqlClient(
       new Map<unknown, unknown>([
         [GetProjectStatusDocument, { projectStatus: { id: "st-1" } }],
-        [
-          GetProjectStatusProjectCountDocument,
-          {
-            projectStatusProjectCount: {
-              count: 3,
-              privateCount: 1,
-              archivedTeamCount: 0,
-            },
-          },
-        ],
       ]),
     );
 
     await expect(getProjectStatus(client, asUuid("st-1"))).resolves.toEqual({
       id: "st-1",
-      projectCount: { count: 3, privateCount: 1, archivedTeamCount: 0 },
     });
   });
 
@@ -106,10 +92,6 @@ describe("getProjectStatus", () => {
     const { client } = mockGqlClient(
       new Map<unknown, unknown>([
         [GetProjectStatusDocument, { projectStatus: null }],
-        [
-          GetProjectStatusProjectCountDocument,
-          { projectStatusProjectCount: { count: 0 } },
-        ],
       ]),
     );
 
@@ -298,45 +280,6 @@ describe("updateProjectStatus", () => {
     ).rejects.toThrow("at least one update field must be provided");
 
     expect(request).not.toHaveBeenCalled();
-  });
-});
-
-describe("reassignProjectStatus", () => {
-  it("resolves when the mutation succeeds", async () => {
-    const { client, request } = mockGqlClient(
-      new Map<unknown, unknown>([
-        [
-          ReassignProjectStatusDocument,
-          { projectReassignStatus: { success: true } },
-        ],
-      ]),
-    );
-
-    await expect(
-      reassignProjectStatus(client, asUuid("st-1"), asUuid("st-2")),
-    ).resolves.toBeUndefined();
-
-    expect(request).toHaveBeenCalledWith(ReassignProjectStatusDocument, {
-      originalProjectStatusId: "st-1",
-      newProjectStatusId: "st-2",
-    });
-  });
-
-  it("throws when the mutation reports failure", async () => {
-    const { client } = mockGqlClient(
-      new Map<unknown, unknown>([
-        [
-          ReassignProjectStatusDocument,
-          { projectReassignStatus: { success: false } },
-        ],
-      ]),
-    );
-
-    await expect(
-      reassignProjectStatus(client, asUuid("st-1"), asUuid("st-2")),
-    ).rejects.toThrow(
-      'Failed to reassign projects from status "st-1" to "st-2"',
-    );
   });
 });
 

@@ -8,14 +8,11 @@ import {
   CreateProjectStatusDocument,
   type CreateProjectStatusMutation,
   GetProjectStatusDocument,
-  GetProjectStatusProjectCountDocument,
-  type GetProjectStatusProjectCountQuery,
   type GetProjectStatusQuery,
   ListProjectStatusesDocument,
   type ListProjectStatusesQuery,
   type ProjectStatusCreateInput,
   type ProjectStatusUpdateInput,
-  ReassignProjectStatusDocument,
   UnarchiveProjectStatusDocument,
   type UnarchiveProjectStatusMutation,
   UpdateProjectStatusDocument,
@@ -36,9 +33,7 @@ type ProjectStatusListItem =
   ListProjectStatusesQuery["projectStatuses"]["nodes"][0];
 export type ProjectStatusDetail = NonNullable<
   GetProjectStatusQuery["projectStatus"]
-> & {
-  projectCount: GetProjectStatusProjectCountQuery["projectStatusProjectCount"];
-};
+>;
 export type CreatedProjectStatus = NonNullable<
   CreateProjectStatusMutation["projectStatusCreate"]["status"]
 >;
@@ -84,30 +79,18 @@ export async function listProjectStatuses(
   };
 }
 
-/**
- * Reads one status together with how many projects sit in it.
- *
- * The count is what decides whether {@link archiveProjectStatus} will be
- * refused, so returning the status without it would leave callers making a
- * second call they cannot know they need.
- */
+/** Reads one status. */
 export async function getProjectStatus(
   client: GraphQLClient,
   id: UUID,
 ): Promise<ProjectStatusDetail> {
-  const [statusResult, countResult] = await Promise.all([
-    client.request(GetProjectStatusDocument, { id }),
-    client.request(GetProjectStatusProjectCountDocument, { id }),
-  ]);
+  const statusResult = await client.request(GetProjectStatusDocument, { id });
 
   if (!statusResult.projectStatus) {
     throw new Error(`Project status with ID "${id}" not found`);
   }
 
-  return {
-    ...statusResult.projectStatus,
-    projectCount: countResult.projectStatusProjectCount,
-  };
+  return statusResult.projectStatus;
 }
 
 /**
@@ -192,31 +175,6 @@ export async function updateProjectStatus(
     "status",
     `Failed to update project status "${id}"`,
   );
-}
-
-/**
- * Moves every project off one status and onto another.
- *
- * Exposed only through `projects statuses archive --reassign-to`, because
- * Linear marks the mutation `[INTERNAL]` and reassignment on its own is not
- * a task anyone sets out to do.
- */
-export async function reassignProjectStatus(
-  client: GraphQLClient,
-  originalProjectStatusId: UUID,
-  newProjectStatusId: UUID,
-): Promise<void> {
-  const result = await client.request(ReassignProjectStatusDocument, {
-    originalProjectStatusId,
-    newProjectStatusId,
-  });
-
-  if (!result.projectReassignStatus.success) {
-    throw new Error(
-      `Failed to reassign projects from status "${originalProjectStatusId}" ` +
-        `to "${newProjectStatusId}"`,
-    );
-  }
 }
 
 export async function archiveProjectStatus(
