@@ -308,7 +308,16 @@ export function setupTeamsCommands(program: Command): void {
         Command,
       ];
       const ctx = createContext(getRootOpts(command));
-      const fields = await buildTeamFields(ctx, options);
+      const { private: isPrivate, ...fields } = await buildTeamFields(
+        ctx,
+        options,
+      );
+      if (isPrivate !== undefined) {
+        throw invalidParameterError(
+          "--private",
+          "Linear no longer accepts it on team create; use teams update",
+        );
+      }
       const input: CreateTeamInput = { ...fields, name };
       const result = await createTeam(ctx.gql, input);
       outputSuccess(result);

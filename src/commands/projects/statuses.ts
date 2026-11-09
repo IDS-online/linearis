@@ -1,12 +1,10 @@
 import type { Command } from "commander";
 import { createContext, getRootOpts } from "../../common/context.js";
 import { invalidParameterError } from "../../common/errors.js";
-import type { UUID } from "../../common/identifier.js";
 import { commandAction, outputSuccess } from "../../common/output.js";
 import type { ProjectStatusType } from "../../gql/graphql.js";
 import { resolveProjectStatusId } from "../../resolvers/project-status-resolver.js";
 import {
-  type ArchivedProjectStatus,
   archiveProjectStatus,
   type CreateProjectStatusInput,
   createProjectStatus,

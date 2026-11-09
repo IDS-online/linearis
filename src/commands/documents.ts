@@ -7,7 +7,6 @@ import { handleCommand, outputSuccess, parseLimit } from "../common/output.js";
 import { type DomainMeta, formatDomainUsage } from "../common/usage.js";
 import { resolveIssueId } from "../resolvers/issue-resolver.js";
 import { resolveProjectId } from "../resolvers/project-resolver.js";
-import { resolveTeamId } from "../resolvers/team-resolver.js";
 import { listAttachments } from "../services/attachment-service.js";
 import {
   buildIssueDocumentFilter,
@@ -191,15 +190,19 @@ export function setupDocumentsCommands(program: Command): void {
           );
         }
 
+        if (options.team) {
+          throw invalidParameterError(
+            "--team",
+            "Linear no longer accepts a team on document create; use --project",
+          );
+        }
+
         const issueIdentifier = options.issue ?? options.attachTo;
         const rootOpts = getRootOpts(command);
         const ctx = createContext(rootOpts);
 
         const projectId = options.project
           ? await resolveProjectId(ctx.gql, options.project)
-          : undefined;
-        const teamId = options.team
-          ? await resolveTeamId(ctx.gql, options.team)
           : undefined;
         const issueId = issueIdentifier
           ? await resolveIssueId(ctx.gql, issueIdentifier)
@@ -209,7 +212,6 @@ export function setupDocumentsCommands(program: Command): void {
           title: options.title,
           content: options.content,
           projectId,
-          teamId,
           issueId,
           icon: options.icon,
           color: options.color,

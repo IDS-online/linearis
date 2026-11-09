@@ -73,8 +73,9 @@ type TeamMutableFields =
   | "autoClosePeriod"
   | "autoArchivePeriod";
 
+// Linear removed `private` from TeamCreateInput; it can only be set by update.
 export type CreateTeamInput = BrandUuidFields<
-  Pick<TeamCreateInput, TeamMutableFields>,
+  Pick<TeamCreateInput, Exclude<TeamMutableFields, "private">>,
   "parentId"
 >;
 export type UpdateTeamInput = BrandUuidFields<
