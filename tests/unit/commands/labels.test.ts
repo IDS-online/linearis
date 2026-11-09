@@ -61,7 +61,6 @@ vi.mock("../../../src/services/label-service.js", () => ({
   retireLabel: vi.fn().mockResolvedValue({
     id: "resolved-label-uuid",
     name: "branch:unmerged",
-    retiredAt: "2026-08-10T00:00:00.000Z",
     type: "issue",
   }),
   restoreLabel: vi.fn().mockResolvedValue({

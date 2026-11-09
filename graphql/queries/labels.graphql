@@ -21,9 +21,6 @@ fragment LabelFields on IssueLabel {
   color
   description
   isGroup
-  # Retired labels stay on the entities that already carry them but cannot
-  # be applied to new ones, so a null here is what "usable" means.
-  retiredAt
   parent {
     id
     name
@@ -36,7 +33,6 @@ fragment ProjectLabelFields on ProjectLabel {
   color
   description
   isGroup
-  retiredAt
   parent {
     id
     name

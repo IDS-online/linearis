@@ -32,9 +32,9 @@ export type UpdatedDocument =
 export type CreateDocumentInput = BrandUuidFields<
   Pick<
     DocumentCreateInput,
-    "title" | "content" | "projectId" | "teamId" | "issueId" | "icon" | "color"
+    "title" | "content" | "projectId" | "issueId" | "icon" | "color"
   >,
-  "projectId" | "teamId" | "issueId"
+  "projectId" | "issueId"
 >;
 export type UpdateDocumentInput = BrandUuidFields<
   Pick<

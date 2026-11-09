@@ -142,8 +142,6 @@ describe("teams create", () => {
       "New Team",
       "--key",
       "NEW",
-      "--private",
-      "true",
       "--cycles-enabled",
       "false",
       "--cycle-duration",
@@ -153,7 +151,6 @@ describe("teams create", () => {
     expect(createTeam).toHaveBeenCalledWith(expect.anything(), {
       name: "New Team",
       key: "NEW",
-      private: true,
       cyclesEnabled: false,
       cycleDuration: 2,
     });

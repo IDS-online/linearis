@@ -25,7 +25,6 @@ vi.mock("../../../src/services/project-status-service.js", () => ({
   getProjectStatus: vi.fn().mockResolvedValue({ id: "st-1" }),
   createProjectStatus: vi.fn().mockResolvedValue({ id: "st-new" }),
   updateProjectStatus: vi.fn().mockResolvedValue({ id: "st-1" }),
-  reassignProjectStatus: vi.fn().mockResolvedValue(undefined),
   archiveProjectStatus: vi.fn().mockResolvedValue({ id: "st-1" }),
   unarchiveProjectStatus: vi.fn().mockResolvedValue({ id: "st-1" }),
 }));
@@ -36,7 +35,6 @@ import {
   archiveProjectStatus,
   createProjectStatus,
   listProjectStatuses,
-  reassignProjectStatus,
   unarchiveProjectStatus,
   updateProjectStatus,
 } from "../../../src/services/project-status-service.js";
@@ -149,32 +147,6 @@ describe("projects statuses", () => {
     expect(updateProjectStatus).not.toHaveBeenCalled();
   });
 
-  it("archive reassigns before archiving when --reassign-to is given", async () => {
-    await run("statuses", "archive", "Done", "--reassign-to", "In Review");
-
-    expect(reassignProjectStatus).toHaveBeenCalledWith(
-      expect.anything(),
-      "status-uuid-1",
-      "status-uuid-2",
-    );
-    expect(archiveProjectStatus).toHaveBeenCalledWith(
-      expect.anything(),
-      "status-uuid-1",
-    );
-  });
-
-  it("archive says where the projects went when it fails after reassigning", async () => {
-    vi.mocked(archiveProjectStatus).mockRejectedValueOnce(
-      new Error("Cannot archive the last status of this type"),
-    );
-
-    await run("statuses", "archive", "Done", "--reassign-to", "In Review");
-
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('In Review\\" and were not moved back'),
-    );
-  });
-
   it("archive reports a plain failure when nothing was reassigned", async () => {
     vi.mocked(archiveProjectStatus).mockRejectedValueOnce(
       new Error("Cannot archive the last status of this type"),
@@ -187,20 +159,9 @@ describe("projects statuses", () => {
     );
   });
 
-  it("archive refuses to reassign a status onto itself", async () => {
-    await run("statuses", "archive", "Done", "--reassign-to", "Done");
-
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining("must name a different status"),
-    );
-    expect(reassignProjectStatus).not.toHaveBeenCalled();
-    expect(archiveProjectStatus).not.toHaveBeenCalled();
-  });
-
   it("archive skips reassignment when the flag is absent", async () => {
     await run("statuses", "archive", "Done");
 
-    expect(reassignProjectStatus).not.toHaveBeenCalled();
     expect(archiveProjectStatus).toHaveBeenCalledWith(
       expect.anything(),
       "status-uuid-1",

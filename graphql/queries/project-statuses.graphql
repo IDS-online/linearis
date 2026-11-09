@@ -46,16 +46,3 @@ query GetProjectStatus($id: String!) {
     ...ProjectStatusCoreFields
   }
 }
-
-# How many projects currently sit in a status
-#
-# Folded into `projects statuses read` rather than exposed as its own
-# verb: the count only means anything next to the status it describes,
-# and it is what tells you whether an archive will be refused.
-query GetProjectStatusProjectCount($id: String!) {
-  projectStatusProjectCount(id: $id) {
-    count
-    privateCount
-    archivedTeamCount
-  }
-}

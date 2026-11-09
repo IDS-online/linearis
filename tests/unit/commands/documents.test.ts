@@ -59,7 +59,6 @@ vi.mock("../../../src/services/document-service.js", async (importOriginal) => {
 
 import { setupDocumentsCommands } from "../../../src/commands/documents.js";
 import { resolveIssueId } from "../../../src/resolvers/issue-resolver.js";
-import { resolveTeamId } from "../../../src/resolvers/team-resolver.js";
 import { listAttachments } from "../../../src/services/attachment-service.js";
 import {
   createDocument,
@@ -176,18 +175,14 @@ describe("documents create", () => {
       "create",
       "--title",
       "Runbook",
-      "--team",
-      "ENG",
       "--attach-to",
       "ENG-42",
     ]);
 
-    expect(resolveTeamId).toHaveBeenCalledWith(expect.anything(), "ENG");
     expect(resolveIssueId).toHaveBeenCalledWith(expect.anything(), "ENG-42");
     expect(createDocument).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        teamId: "resolved-team-uuid",
         issueId: "resolved-issue-uuid",
       }),
     );
